@@ -1,0 +1,4 @@
+- source: project
+  quarto-pub:
+    - id: 32c95e94-a610-4787-937f-0798c97599aa
+      url: 'https://acasbff.quarto.pub/gasdb-explore'

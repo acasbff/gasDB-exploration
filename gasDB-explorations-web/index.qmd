@@ -1,0 +1,1057 @@
+---
+title: "Exploration of gas power plant data"
+author: "Ana Afonso Silva"
+date: "`r Sys.Date()`"
+---
+
+```{css, echo = FALSE}
+h1 {
+  font-family: 'Montserrat';
+  font-weight: bold;
+  color: #00a1e3;
+}
+
+h2 {
+  border-top: 1px solid #ccc; /* Adjust color and size as needed */
+  padding-top: 10px; 
+  padding-bottom: 10px; 
+}
+
+h3 {
+  border-bottom: 1px solid #ccc; /* Adjust color and size as needed */
+  padding-top: 5px; /* Add some space above the line */
+  padding-bottom: 5px; 
+}
+
+body {
+  font-family: 'Open sans', sans-serif;
+}
+
+```
+
+```{r}
+#| echo: false
+library(scales)
+library(tidyverse)
+library(readxl)
+library(here)
+library(knitr)
+library(kableExtra)
+library(openxlsx)
+library(hues)
+library(DT)
+library(patchwork)
+library(showtext)
+library(ggtext)
+library(RSQLite)
+library(DBI)
+
+filter = dplyr::filter
+count = dplyr::count
+mutate = dplyr::mutate
+select = dplyr::select
+rename = dplyr::rename
+recode = dplyr::recode
+
+showtext_auto(TRUE)
+font_add("Sans", regular = "/Library/Fonts/OpenSans-Regular.ttf")
+
+theme_set(theme(text = element_text(family="Sans")))
+#theme_set(theme_update(text = element_text(family = "Open Sans")))
+
+colStatus <- c("#F79F0F", "#E64795", "#114B63", "#00A1E3", "#8EDFFF", "#3AA26C")
+names(colStatus) <- c("Installed", "Planned", "Construction", "Shelved", "Cancelled", "Retired")
+
+colStatus2 <- c("#E64795", "#F2A3CA", "#114B63", "#F79F0F", "#FBCF87", "#00A1E3", "#8EDFFF", "#3AA26C")
+names(colStatus2) <- c("announced","pre-construction","construction","operating","mothballed","shelved","cancelled","retired" )
+```
+
+## Overview of the data
+
+```{r}
+countryMatch0 <- read_delim('/Users/acas/Dropbox/BFF/projects/BFFcountries.txt', show_col_types = FALSE) %>% 
+  rename(country = Iso2)
+countryMatch <- select(countryMatch0, country, Country) 
+
+### get query tables from Gas database
+gasdb <- dbConnect(RSQLite::SQLite(), "/Users/acas/Library/CloudStorage/Box-Box/Internal database folder/4 - Fossil gas DB/1 - Manual and Gas DB/1 - Gas DB/GasDB")
+## dbListTables(gasdb)
+allData <- dbReadTable(gasdb, "BASE2_units_last_timestamp") %>%  
+  left_join(countryMatch) %>%  # could consider add country from the database
+  mutate(start_year = ifelse(start_year == 1800, NA, start_year)) ### make 1800 years into missing data...?
+  
+OwnerDt0 <- dbReadTable(gasdb, "BASE4_capacity_per_unit_per_parent") 
+
+# statusPlant1 <- dbReadTable(gasdb, "BASE7_status_and_capacity_per_plant") %>%       ### slower than R
+#   mutate(capacity_MW_installed = ifelse((capacity_MW_operating + capacity_MW_mothballed) == 0, NA, capacity_MW_operating + capacity_MW_mothballed),
+#          capacity_MW_planned = ifelse((capacity_MW_announced + capacity_MW_preconstruction) == 0, NA, capacity_MW_announced + capacity_MW_preconstruction))
+
+
+# download.file('https://ember-climate.org/app/uploads/2022/07/yearly_full_release_long_format.csv', paste0('yearly_full_release_long_format_',
+#                      str_remove_all(Sys.Date(), "-"), ".csv"), mode = "wb")
+
+ember0 <- read_csv('../yearly_full_release_long_format_20240830.csv', show_col_types = FALSE) %>% 
+  left_join(select(countryMatch0, `Country code` = Iso3, Country)) %>% 
+  drop_na(Country)
+
+gemFuelData <- suppressWarnings(read_excel('/Users/acas/Dropbox/BFF/projects/GasRelated/dataChecks/DB_comparisons/GOGPT_dl2024-03-29_filteredCountryFossilGas.xlsx')) %>% 
+  select(`Unit ID`, Fuel) %>% 
+  mutate(Fuel_type = ifelse(str_detect(Fuel, fixed(", ")), "multiple","NG")) %>% 
+  rename(gem_unit_id = `Unit ID`)
+
+cleanData <- tibble(allData) %>% 
+  unite("owners", c(owner_1, owner_2, owner_3), remove = TRUE, na.rm = TRUE, sep = "|") %>% 
+  mutate(plant_name = str_remove_all(plant_name_eng, " power station")) %>% 
+  select(Country, plant_name,unit_name,start_year,capacity_mw,status,owners) 
+
+cleanData %>% 
+  datatable(
+    filter = "top",  
+    rownames = FALSE, 
+    extensions = 'Scroller', 
+    options = list(
+      autoWidth = TRUE,
+      deferRender = TRUE,
+      scrollY = 300,
+      scrollX = TRUE,    # Enable horizontal scrolling
+      scroller = TRUE, 
+      orderMulti = TRUE,  # Enable multiple column sorting
+      initComplete = JS(
+        "function(settings, json) {",
+        "$('.dataTables_wrapper').css('font-size', '12px');",  # Adjust font size here
+        "}"
+      )
+    ),
+    caption = htmltools::tags$caption(
+      style = 'caption-side: bottom; text-align: left; font-size: 12px; color: #777; font-style: italic;',
+      'Note: Hold Shift to sort by multiple columns'
+    )
+  )
+```
+
+```{r}
+### making BASE7_status_and_capacity_per_plant table from (faster to load)
+capacity_per_status <- allData %>%
+  group_by(bff_plant_id, year) %>%
+  summarise(
+    capacity_MW_operating = round(sum(ifelse(status == 'operating', capacity_mw, 0)), 1),
+    capacity_MW_announced = round(sum(ifelse(status == 'announced', capacity_mw, 0)), 1),
+    capacity_MW_preconstruction = round(sum(ifelse(status == 'pre-construction', capacity_mw, 0)), 1),
+    capacity_MW_construction = round(sum(ifelse(status == 'construction', capacity_mw, 0)), 1),
+    capacity_MW_retired = round(sum(ifelse(status == 'retired', capacity_mw, 0)), 1),
+    capacity_MW_mothballed = round(sum(ifelse(status == 'mothballed', capacity_mw, 0)), 1),
+    capacity_MW_shelved = round(sum(ifelse(status == 'shelved', capacity_mw, 0)), 1),
+    capacity_MW_cancelled = round(sum(ifelse(status == 'cancelled', capacity_mw, 0)), 1)
+  ) %>%
+  ungroup()
+
+plant_status <- allData %>%
+  group_by(bff_plant_id) %>%
+  summarise(
+    Status_plant = case_when(
+      any(status %in% c('operating', 'mothballed')) ~ 'Installed',
+      any(status == 'construction') ~ 'Construction',
+      any(status %in% c('announced', 'pre-construction')) ~ 'Planned',
+      any(status == 'shelved') ~ 'Shelved',
+      any(status == 'cancelled') ~ 'Cancelled',
+      all(status == 'retired') ~ 'Retired',
+      TRUE ~ 'Unknown'
+    )
+  ) %>%
+  ungroup()
+
+status_and_date <- plant_status %>%
+  left_join(allData, by = "bff_plant_id") %>%
+  group_by(bff_plant_id) %>%
+  summarise(
+    Status_plant = first(Status_plant),
+    retired_year = ifelse(Status_plant == 'Retired', 
+                          as.character(max(ifelse(status == 'retired', retirement_year, NA), na.rm = TRUE)), 
+                          "[Not relevant]"),
+    planned_retire_last_unit = case_when(
+      Status_plant %in% c('Retired', 'Cancelled') ~ NA_character_,
+      Status_plant %in% c('Installed', 'Construction', 'Planned', 'Shelved') & 
+        any(is.na(planned_retirement_year) & !status %in% c('retired', 'cancelled')) ~ 'Not planned',
+      TRUE ~ as.character(ifelse(all(is.na(planned_retirement_year)), NA, max(planned_retirement_year, na.rm = TRUE)))
+    ),
+    start_year_first_unit = case_when(
+      Status_plant == 'Cancelled' ~ NA_character_,
+      any(start_year == 1800 | is.na(start_year)) ~ 'Unknown',
+      TRUE ~ as.character(ifelse(all(is.na(start_year)), NA, min(start_year[start_year > 1800], na.rm = TRUE)))
+    ),
+    start_year_last_unit = case_when(
+      Status_plant == 'Cancelled' ~ NA_character_,
+      any(is.na(start_year)) | !any(start_year > 1800) ~ 'Unknown',
+      TRUE ~ as.character(ifelse(all(is.na(start_year)), NA, max(start_year[start_year > 1800], na.rm = TRUE)))
+    ),
+    CHP = case_when(
+      any(!is.na(chp)) ~ ifelse(max(chp, na.rm = TRUE) == 1, 'Yes', 'No'),
+      TRUE ~ 'Unknown'
+    )
+  ) %>%
+  ungroup()
+
+statusPlant <- allData %>%
+  left_join(capacity_per_status, by = c("bff_plant_id", "year")) %>%
+  left_join(status_and_date, by = "bff_plant_id") %>%
+  group_by(bff_plant_id) %>%
+  reframe(
+    Country = first(Country),
+    Name_English_short = gsub(" power station| power plant", "", first(plant_name_eng)),
+    Status_plant = first(Status_plant),
+    start_year_first_unit = first(start_year_first_unit),
+    capacity_MW_installed = ifelse((capacity_MW_operating + capacity_MW_mothballed) == 0, NA, capacity_MW_operating + capacity_MW_mothballed),
+    capacity_MW_planned = ifelse((capacity_MW_announced + capacity_MW_preconstruction) == 0, NA, capacity_MW_announced + capacity_MW_preconstruction),
+    capacity_MW_construction = ifelse(capacity_MW_construction == 0, NA, capacity_MW_construction),
+    capacity_MW_shelved = ifelse(capacity_MW_shelved == 0, NA, capacity_MW_shelved),
+    capacity_MW_cancelled = ifelse(capacity_MW_cancelled == 0, NA, capacity_MW_cancelled),
+    capacity_MW_retired = ifelse(capacity_MW_retired == 0, NA, capacity_MW_retired)
+  ) %>%
+  ungroup() %>%
+  arrange(Country, Name_English_short) %>% 
+  distinct()
+
+```
+
+### Verify how many power plant units have multiple fuel or are peaker
+
+```{r, fig.width=8, fig.height=4}
+issues <- select(allData, bff_unit_id , gem_unit_id, status, technology, fuel_main, fuel_secondary) %>% 
+  mutate(Fuel_type_BFF = ifelse(is.na(fuel_secondary), "NG", "multiple")) %>% 
+  inner_join(gemFuelData) %>% 
+  rename( Fuel_GEM = Fuel, Fuel_type_GEM = Fuel_type) %>% 
+  filter(Fuel_type_BFF != Fuel_type_GEM)
+## 232 units differ in single vs multiple with GEM so should be checked with most recent GEM update
+## write.xlsx(issues, 'fuelIssues_GEM_BFF.xlsx', colWidths = "auto")
+
+fuelUnits <- allData %>% 
+  select(bff_plant_id, capacity_mw, type, fuel_main, fuel_secondary) %>% 
+  mutate(type = ifelse(is.na(type), "baseload", str_to_lower(type)),
+         Fuel_type = ifelse(is.na(fuel_secondary), "NG", "multiple"))
+
+f0c <- ggplot(fuelUnits, aes(x = type, y = capacity_mw)) +
+  geom_bar(stat = "summary", fun = sum, show.legend = FALSE) +
+  stat_summary(aes(label = round(stat(y),0)), fun.y = 'sum', geom = 'text', vjust = -0.1, size = 3) +
+  theme_bw() +
+  scale_y_continuous(labels = label_number()) +
+  labs(x = "",
+       y = "Total capacity of power plant units",
+       caption = "All except peaker are baseload")
+
+f1c <- ggplot(fuelUnits, aes(x = Fuel_type, y = capacity_mw, fill = Fuel_type)) +
+  geom_bar(stat = "summary", fun = sum, position = 'dodge', show.legend = FALSE ) +
+    stat_summary(aes(label = round(stat(y),0)), fun.y = 'sum', geom = 'text', vjust = 1.5, size = 3) +
+  facet_wrap(~type, scale = "free") +
+  theme_bw() +
+  scale_y_continuous(labels = label_number()) +
+  labs(y = "Total capacity of power plant units", x = "Fuel type")
+
+f0cf1c <- (f0c + f1c) +
+  patchwork::plot_layout(widths = c(0.5, 2), guides = 'collect') +
+  patchwork::plot_annotation(
+    title = 'Comparison with capacity')
+f0cf1c
+
+f0N <- ggplot(fuelUnits, aes(x = type)) +
+  geom_bar(show.legend = FALSE ) +
+    geom_text(stat='count', aes(label=..count..), vjust=-0.1, size = 3) + 
+  theme_bw() +
+  scale_y_continuous(labels = label_number()) +
+  labs(x = "",
+       y = "Count of power plant units", caption = 'All except peaker are baseload')
+
+f1N <- ggplot(fuelUnits, aes(x = Fuel_type, fill = Fuel_type)) +
+  geom_bar(position = 'dodge', show.legend = FALSE ) +
+    geom_text(stat='count', aes(label=..count..), vjust=1.5, size = 3) + 
+  facet_wrap(~type, scale = "free") +
+  theme_bw() +
+  scale_y_continuous(labels = label_number()) +
+  labs(y = "Count of power plant units", x = "Fuel type")
+
+f0Nf1N <- (f0N + f1N) +
+  plot_layout(widths = c(0.5, 2), guides = 'collect') +
+  plot_annotation(
+    title = "Comparison with number of power plant units")
+f0Nf1N
+
+```
+
+------------------------------------------------------------------------
+
+### Verify how many units have multiple owners
+
+```{r}
+# df <- allData %>% 
+#   select(bff_unit_id, capacity_mw, owner_1:owner_3_share) 
+# 
+# # Pre-allocate the list to store the data
+# rows <- list()
+# 
+# # Loop through each row of the dataframe
+# for (i in 1:nrow(df)) {
+#   # Extract the current row's data
+#   current_row <- df[i, ]
+#   capacity_mw <- current_row$capacity_mw
+#   
+#   # Determine the number of owners with non-NA shares
+#   non_na_shares <- sum(!is.na(current_row[grepl("_share$", names(current_row))]))
+#   N_ownerUnit <- ifelse(non_na_shares > 0, non_na_shares, 3) # Assume 3 if all shares are NA
+#   
+#   # Loop through each owner
+#   for (j in 1:3) {
+#     owner <- current_row[[paste0("owner_", j)]]
+#     # Skip the loop iteration if owner is NA
+#     if (is.na(owner)) next
+#     
+#     owner_share <- current_row[[paste0("owner_", j, "_share")]]
+#     capacity_adjusted <- ifelse(is.na(owner_share), capacity_mw / N_ownerUnit, capacity_mw * owner_share)
+#     
+#     # Append the data to the list
+#     rows <- c(rows, list(data.frame(
+#       bff_unit_id = current_row$bff_unit_id,
+#       N_ownerUnit = N_ownerUnit,
+#       owner = owner,
+#       capacity_mw = capacity_mw,
+#       owner_share = owner_share,
+#       capacity_adjusted = capacity_adjusted
+#     )))
+#   }
+# }
+# 
+# # Combine the list of data frames into one data frame
+# OwnerDt <- do.call(rbind, rows)
+# 
+# # Convert the capacity_adjusted to numeric in case it is not already
+# OwnerDt$capacity_adjusted <- as.numeric(OwnerDt$capacity_adjusted)
+
+OwnerDt <- select(OwnerDt0, bff_plant_id, bff_unit_id, 
+                   owner, parent, capacity_mw, share) %>%
+  rename(capacity_adjusted = capacity_mw, owner_share = share) %>% 
+  group_by(bff_unit_id) %>%
+  mutate(N_ownerUnit = n_distinct(owner),
+         capacity_mw = sum(capacity_adjusted, na.rm = TRUE)) %>%
+  ungroup() 
+
+mutOwner <- OwnerDt %>% 
+  mutate(ownerType = case_when(owner %in% 'not found' ~ 'not found',
+                               TRUE~paste(N_ownerUnit,"owner"))) %>% 
+  select(bff_unit_id, ownerType, capacity_mw, capacity_adjusted) %>% 
+  distinct()
+
+f2.1 <- ggplot(mutOwner, aes(x = ownerType)) +
+  geom_bar() +
+    geom_text(stat='count', aes(label=..count..), vjust=-0.5) +
+  theme_bw() +
+  labs(x = "Type of owner", y = "Counts of units")
+f2.1
+```
+
+### Verify how many power plants have units with different status
+
+```{r}
+unitsStatus <- allData %>% 
+  select(bff_plant_id, bff_unit_id, status) %>% 
+  left_join(select(statusPlant, bff_plant_id, Status_plant)) %>% 
+  group_by(bff_plant_id) %>% 
+  mutate(`How many units per power plant` = n_distinct(bff_unit_id),
+         `How many different unit status per power plant` = n_distinct(status)) %>% 
+  ungroup()
+
+issuesStatus <- unitsStatus %>% 
+  group_by(`How many units per power plant`) %>% 
+  tally() %>% 
+  filter(`How many units per power plant` != 1) %>% 
+  pull(n) %>% 
+  sum(.)
+
+f3.1 <- ggplot(unitsStatus , aes(x = fct_infreq(status))) +
+  geom_bar() +
+  geom_text(stat='count', aes(label=..count..), vjust=-0.5) +
+  theme_bw() +
+  labs(y = "Count of units", x = "status")
+f3.1
+
+f3.2 <- unitsStatus %>% 
+  pivot_longer(col = c('How many units per power plant', 
+                       'How many different unit status per power plant')) %>% 
+  ggplot(aes(x = (as.factor(value)))) +
+  geom_bar() +
+  geom_text(stat='count', aes(label=..count..), vjust=-0.5) +
+  facet_wrap(~fct_rev(name), scale = "free") +
+  labs(x = NULL, y = "Counts")
+f3.2
+```
+
+`r issuesStatus` power plants have units with different status.
+
+```{r}
+StatusVerification <- unitsStatus %>%
+  group_by(bff_plant_id) %>%
+  mutate(statusAll = str_c(sort(unique(status)), collapse = "|")) %>% 
+  ungroup() %>% 
+   filter(`How many different unit status per power plant` > 1) %>% 
+  select(bff_plant_id, Status_plant, statusAll) %>% 
+  distinct() %>% 
+  mutate(highlight = ifelse(str_detect(statusAll, "operating"), "has_Operating", "Other"))
+
+ggplot(StatusVerification, aes(y = fct_infreq(statusAll))) +
+  geom_bar(aes(fill = highlight),show.legend = FALSE) +
+  geom_text(stat='count', aes(label=..count..), hjust=-0.1) +
+  theme_bw() +
+  scale_fill_manual(values = c("has_Operating" = "grey", "Other" = "purple")) +
+  labs(y = "" , x = "Counts of power plants", 
+       title = 'All power plants with more than 1 unit status have "Installed" has power plant status',
+       subtitle = 'Highlighted purple the status combination without any operating unit')
+
+```
+
+Not sure if the power plants where there are no operating unit should have a "Installed" power plant status.
+
+------------------------------------------------------------------------
+
+## Overall capacity per status
+
+### Overall (unit and power plant status)
+
+```{r}
+colStatus3 <- colStatus
+names(colStatus3) <- c("operating+mothballed", 'pre-construction+announced', 'construction', 'shelved', 'cancelled', 'retired')
+cap <- select(allData, bff_plant_id, bff_unit_id, Country, capacity_mw, status) %>% 
+  left_join(select(statusPlant, bff_plant_id, Status_plant)) %>% 
+  mutate(Status_plant = factor(Status_plant, levels = names(colStatus)),
+         status3 = case_when(status %in% c('operating','mothballed') ~ "operating+mothballed",
+                             status %in% c('pre-construction','announced') ~ 'pre-construction+announced',
+                                           TRUE ~ status),
+         status3 = factor(status3, levels = names(colStatus3)))
+
+ggplot(cap, aes(x = fct_infreq(Status_plant), y = capacity_mw, fill = fct_infreq(status))) +
+  geom_bar(stat = "summary", fun = sum, position = position_dodge(width = 0.9)) +
+  geom_text(stat = "summary", aes(label = round(..y.., 0)), 
+            fun = sum, position = position_dodge(width = 0.9), 
+            vjust = -0.1, size = 3) +
+  labs(x="Per power plant status", y = "Per unit capacity",
+       fill = 'Per unit status') +
+  scale_fill_manual(values = colStatus2) +
+  theme_bw() 
+```
+
+### Per country (unit status)
+
+```{r}
+#| fig-width: 10
+#| fig-height: 13
+ggplot(cap, aes(x = fct_infreq(status3), 
+                y = capacity_mw, fill = status3)) +
+  geom_bar(stat = "summary", fun = sum) +
+  geom_text(stat = "summary", aes(label = round(..y.., 0)),
+            fun = sum,
+            vjust = -0.15, size = 2) +
+  lemon::facet_rep_wrap(~Country, ncol = 4, scales = "free_y", repeat.tick.labels = 'all') +
+  labs(x=NULL, fill = NULL, y = "Capacity") +
+  scale_fill_manual(values = colStatus3) +
+  scale_y_continuous(expand = expansion(mult = c(0, .1))) +
+  theme_classic() +
+  theme(
+    legend.position = 'bottom',
+    strip.background = element_rect(fill = "white", colour = NA),  
+    axis.text.x = element_blank(),
+    axis.ticks = element_blank(), 
+    axis.line = element_blank(),
+    axis.text.y = element_text(vjust = 0),
+    panel.grid.major.y = element_line(),
+    panel.grid.major.x = element_blank(),  # Remove major gridlines
+    panel.grid.minor = element_blank(),  # Remove minor gridlines
+    axis.title.y = element_text(vjust = 1, hjust = 1),  # Move y axis label to the top
+  ) 
+```
+
+------------------------------------------------------------------------
+
+```{r}
+#| fig-width: 10
+#| fig-height: 8.5
+#| 
+cap2 <- cap %>%
+  group_by(Country) %>%
+  mutate(total_capacity = sum(capacity_mw, na.rm = TRUE)) %>%
+  ungroup() %>%
+  mutate(Country = fct_reorder(Country, total_capacity)) 
+
+ranked_countries_by_status <- cap2 %>%
+  filter(status3 %in% names(colStatus3)[1:3]) %>% 
+  group_by(status3, Country) %>%
+  summarize(total_capacity = sum(capacity_mw, na.rm = TRUE)) %>%
+  mutate(Rank = rank(-total_capacity, ties.method = "min")
+         ) %>%
+  arrange(status3, total_capacity) %>% 
+  ungroup() %>% 
+  mutate(Top5other = case_when(Rank > 5 ~ 'Other',
+                               TRUE ~ as.character(Rank)),
+         Country2 = case_when(Rank > 5 ~ 'Other',
+                             TRUE ~ Country)) 
+
+NcountriesOther <- ranked_countries_by_status %>%
+  filter(Country2 %in% 'Other') %>% 
+  group_by(status3) %>% 
+  tally()
+
+captop5other <- ranked_countries_by_status %>% 
+  group_by(status3, Top5other) %>% 
+  summarize(total_CapacityOther = sum(total_capacity, na.rm = TRUE)) %>% 
+  left_join(select(ranked_countries_by_status, -total_capacity, -Rank, -Country)) %>% 
+  left_join(NcountriesOther) %>% 
+  distinct() %>% 
+  mutate(Top5other2 = ifelse(Country2 %in% 'Other', paste0(Country2, " (",n,")"),'Top 5 countries'))
+
+cc <- unique(captop5other$Country2)[!unique(captop5other$Country2) %in% "Other"]
+colsCountries <- c(iwanthue(length(cc)),'grey60')
+names(colsCountries) <- c(cc, "Other")
+
+bbb <- captop5other %>% 
+  ungroup() %>% 
+  ggplot(aes(x = fct_inorder(Top5other2), y = total_CapacityOther, 
+             fill = factor(Country2, levels = unique(Country2)))) +
+  geom_bar(stat = 'identity', position = "stack",
+           width = 0.98, 
+           show.legend = FALSE) +
+  geom_text(aes(label = Country2), position = position_stack(vjust = 0.5),
+             size.unit = 'pt', size = 9.5, fontface = 'bold') +
+    facet_wrap(~ status3, ncol = 3, scales = "free_x") + 
+  labs(y = "Total Capacity", x = NULL) +
+  scale_y_continuous(expand = expansion(mult = c(0, 0.01)),
+                     breaks = c(10000, 20000, 50000, 100000, 150000)) +
+    scale_fill_manual(values = colsCountries) +
+  theme_bw() +
+  theme(strip.background = element_blank(),
+        legend.position = 'bottom',
+        axis.text.y = element_text(face = 'bold'),
+        strip.text = element_text(face = 'bold', size = 12),
+        axis.ticks.y = element_blank(), 
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank()
+  ) 
+bbb
+```
+
+```{r}
+#| fig-width: 10
+#| fig-height: 4
+#| 
+f3b <- captop5other %>% 
+  ggplot(aes(y = fct_rev(Top5other), x = total_CapacityOther)) +
+  geom_bar(aes(color = word(Country2, sep = fixed("-"),-1)),
+           fill = NA,
+           linewidth = 1.5,
+           show.legend = FALSE,
+           width = 0.7,
+           stat = 'identity') +
+  geom_text(aes(label = round(total_CapacityOther, 0)),
+            hjust = 1.2, size.unit = 'pt', size = 8) +
+  geom_text(stat = "identity", aes(label = Country2),
+            hjust = -0.2, size.unit = 'pt', size = 8, fontface = 'bold') +
+  lemon::facet_rep_wrap(~fct_inorder(status3), ncol = 3, scales = "free_x", 
+                        repeat.tick.labels = 'x', drop = TRUE) +
+  labs(y = "Rank", x = 'Total capacity') +
+  scale_color_manual(values = colsCountries) +
+  scale_x_continuous(expand = expansion(mult = c(0, .12))) +
+  theme_classic() +
+  theme(strip.background = element_blank(),
+        legend.position = 'bottom',
+        axis.text.y = element_text(face = 'bold'),
+        strip.text = element_text(face = 'bold', size = 12),
+        axis.ticks.y = element_blank(), 
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank()
+  ) 
+f3b
+```
+
+------------------------------------------------------------------------
+
+## Capacity for top 10 utilities
+
+```{r}
+cap_utilities <- #allData %>% 
+  # mutate(plant_name = str_remove_all(plant_name_eng, " power station")) %>% 
+  # select(bff_unit_id, bff_plant_id, Country, plant_name, unit_name, start_year, status) %>% 
+  # full_join(OwnerDt) %>% 
+  # group_by(bff_plant_id, owner, status) %>% 
+  # mutate(Cap_adjPlantStatus = sum(capacity_adjusted)) %>% 
+  # ungroup() %>% 
+  # left_join(ParentDt, relationship = "many-to-many")
+
+  left_join(OwnerDt,
+            select(allData , bff_unit_id, Country, plant_name_eng, start_year, status)) %>% 
+  mutate(plant_name = str_remove_all(plant_name_eng, " power station"),
+         status3 = case_when(status %in% c('operating','mothballed') ~ "operating+mothballed",
+                             status %in% c('pre-construction','announced') ~ 'pre-construction+announced',
+                             TRUE ~ status),
+         status3 = factor(status3, levels = names(colStatus3)))
+```
+
+### Across Europe per status
+
+```{r}
+#| fig-width: 10
+#| fig-height: 20
+#| 
+### first get total capacity per parent company given each status3 and Rank them within each Status3
+capParent_status1 <- cap_utilities  %>%
+  mutate(missingParent = if_else(parent == "not found", 1, 0)) %>% ### to handle when parent is missing
+  group_by(parent, status3, missingParent) %>%
+  summarize(ParentStatus3_CapPlant = sum(capacity_adjusted, na.rm = T)) %>%
+  arrange(missingParent, desc(ParentStatus3_CapPlant)) %>%
+  ungroup() %>% 
+  group_by(status3) %>% 
+  mutate(Rank = row_number(),
+         Rank = if_else(Rank <= 10, as.character(Rank), "Other"),
+         RankP = if_else(Rank %in% 'Other', 'Other', paste0(Rank,'-',parent)),
+         Top10other = if_else(Rank %in% 'Other', 'Other', 'Top 10'))  
+
+plot_for_status3 <- function(status_value) {
+  capParent_status1 %>%
+    filter(status3 %in% status_value) %>%
+    mutate(Top10ParentOther = ifelse(Top10other %in% 'Other', 'Other', parent)) %>%
+    group_by(Top10ParentOther) %>%
+    mutate(capTop10other = sum(ParentStatus3_CapPlant)) %>%
+    ungroup() %>%
+    select(Top10ParentOther, capTop10other, Rank, RankP, Top10other) %>%
+    distinct() %>%
+    arrange(as.numeric(Rank)) %>%
+    mutate(RankP = factor(RankP, levels = unique(RankP[order(as.numeric(Rank))]))) %>%
+    ggplot(
+      aes(y = capTop10other, 
+          x = fct_rev(Top10other),
+          fill = RankP)) +
+    geom_col() +
+    geom_text(size.unit = 'pt', size = 7,
+      position = position_stack(vjust = 0.5), aes(label = round(..y.., 0))) +
+    coord_cartesian() +
+    labs(x = NULL, 
+         y = 'Total capacity', 
+         title = paste('Ranking of top 10 parent companies for', status_value)) +
+    scale_fill_manual(values = colorspace::lighten(c(RColorBrewer::brewer.pal(10, "Spectral"),
+                                                     'gray90'), 0.2),
+                      name = 'Ranking') +
+    theme_bw() +
+    theme(text = element_text(size = 10))
+}
+
+plotsRankUti <- map(unique(capParent_status1$status3), plot_for_status3)
+plotsRankUti[[2]] /
+plotsRankUti[[5]] /
+plotsRankUti[[1]] /
+plotsRankUti[[3]] /
+plotsRankUti[[4]] /
+plotsRankUti[[6]] 
+
+```
+
+------------------------------------------------------------------------
+
+### Per Country
+
+```{r}
+# Function to create the plot for a given status3
+CountryRanking_perStatusPlot <- function(status_value) {
+  utilitiesOpenCountry <- cap_utilities %>% 
+    filter(status3 %in% status_value, !owner %in% 'not found') %>%
+    group_by(Country, parent) %>%
+    summarize(NpowerPlants = n(),
+              ParentCountry_CapPlant = sum(capacity_adjusted, na.rm = TRUE), .groups = 'drop') %>%
+    arrange(Country, desc(ParentCountry_CapPlant)) %>%
+    ungroup() %>% 
+    group_by(Country) %>%
+    mutate(Rank = row_number()) %>% 
+    ungroup() 
+  
+  top10Europe <- utilitiesOpenCountry %>% 
+    group_by(parent) %>%
+    summarize(ParentCapacity = sum(ParentCountry_CapPlant)) %>% 
+    arrange(desc(ParentCapacity)) %>% 
+    mutate(EURank = row_number()) %>%
+    filter(EURank <= 10) %>%  # Ensure only top 10 are taken
+    mutate(parent_EURank = paste0(EURank, " - ", parent)) 
+  
+  utilitiesOpenCountryEUTop <- utilitiesOpenCountry %>%
+    left_join(top10Europe, by = 'parent') %>% 
+    replace_na(list(parent_EURank = "Other")) %>% 
+    mutate(parent_EURank = factor(parent_EURank, 
+                                  levels = c(unique(top10Europe$parent_EURank), "Other")))
+  
+  # Generate the plot
+  utilitiesOpenCountryEUTop %>%  
+    filter(Rank <= 10) %>% 
+    ggplot(aes(x = fct_inorder(as.character(Rank)), 
+               y = ParentCountry_CapPlant,
+               fill = parent_EURank)) + 
+    geom_col(color = "gray20", linewidth = 0.1) +  # Outline color for bars
+    geom_text(aes(label = NpowerPlants), position = position_stack(vjust = 0.5), size = 2, color = "grey10") + 
+    scale_fill_manual(values = alpha(c(RColorBrewer::brewer.pal(10, "Spectral"), 'gray90'), 0.7)) +
+    facet_wrap(~Country, ncol = 3, scale = "free_y") + 
+    theme_bw(base_family = "sans") +
+    theme(
+      strip.background = element_rect(fill = "white", colour = NA),  
+      axis.ticks = element_blank(),
+      axis.text.y = element_text(vjust = 0),
+      panel.grid.major = element_blank(),  # Remove major gridlines
+      panel.grid.minor = element_blank(),  # Remove minor gridlines
+      panel.border = element_rect(color = "gray20", fill = NA, linewidth = 0.5),
+      axis.title.y = element_text(vjust = 1, hjust = 1)  # Move y axis label to the top
+    ) +
+    labs(y = 'Total Capacity (MW)', x = 'Ranking per country', 
+         fill = "Top 10 ranking across Europe:", 
+         title = paste("Ranking of top 10 parent companies per country with", status_value, "status"),
+         subtitle = "Number of power plants per parent company is shown inside the bars") +
+    scale_y_continuous(expand = expansion(mult = c(0, .05)))
+}
+
+
+# Apply the function to each unique status3 and store the plots in a list
+plots <- map(unique(cap_utilities$status3), CountryRanking_perStatusPlot)
+
+```
+
+#### Pre-construction + announced
+
+```{r}
+#| fig-height: 9.5
+#| echo: false
+plots[[1]]
+```
+
+#### Construction
+
+```{r}
+#| fig-height: 6
+#| echo: false
+#| 
+plots[[5]]
+```
+
+#### Operating + mothballed
+
+```{r}
+#| fig-height: 16
+#| echo: false
+plots[[2]]
+```
+
+#### Shelved
+
+```{r}
+#| fig-height: 7
+#| echo: false
+plots[[3]]
+```
+
+#### Cancelled
+
+```{r}
+#| fig-height: 5
+#| echo: false
+plots[[4]]
+```
+
+#### Retired
+
+```{r}
+#| fig-height: 2.5
+#| echo: false
+#| 
+plots[[6]]
+```
+
+------------------------------------------------------------------------
+
+------------------------------------------------------------------------
+
+## Projected new capacity vs all fuels (from Ember)
+
+All BFF countries with any planned or in construction capacity
+
+```{r}
+#| fig-width: 10
+#| fig-height: 7
+
+PlannedCountries <- filter(statusPlant, !is.na(capacity_MW_planned) | !is.na(capacity_MW_construction)) %>% 
+  select(Country, capacity_MW_planned, capacity_MW_construction) %>%
+  pull(Country) %>% 
+  unique()
+
+statusPlant2 <- statusPlant %>% 
+    filter(Country %in% PlannedCountries) %>% 
+  mutate(capacity_new = rowSums(select(., capacity_MW_construction, capacity_MW_planned, capacity_MW_shelved), na.rm = TRUE)) %>% 
+  group_by(Country) %>% 
+  summarize(capacity = sum(capacity_new, na.rm = TRUE), Aggregate = "New projected fossil gas capacity" ) 
+
+ember <- ember0 %>% 
+  filter(Country %in% PlannedCountries, 
+         Year %in% 2022, 
+         Category %in% 'Capacity', 
+         Subcategory %in% 'Fuel') %>% 
+  mutate(Aggregate = case_when(Variable %in% c('Coal',"Other Fossil") ~ "Coal & other fossil",
+                               Variable %in% "Gas" ~ "Fossil gas",
+                               Variable %in% c("Solar","Wind") ~ "Solar & wind",
+                               TRUE~"Other fuels")) %>% 
+  group_by(Country, Aggregate) %>% 
+  summarize(capacity = sum(Value, na.rm = TRUE)*1000) %>% 
+  ungroup() %>%
+    bind_rows(statusPlant2) %>% 
+  group_by(Country) %>%
+  mutate(total_capacity = sum(capacity),
+         percent_capacity = (capacity / total_capacity) * 100) %>%
+  ungroup() %>%
+   arrange(desc(Country),match(Aggregate, c("New projected fossil gas capacity","Fossil gas", "Coal & other fossil", "Other fuels", "Solar & wind" )))
+
+ggplot(ember, aes(x = percent_capacity, y = fct_inorder(Country), fill = fct_rev(fct_inorder(Aggregate)))) +
+  geom_col() +
+  scale_x_continuous(labels = scales::percent_format(scale = 1)) +  
+  scale_fill_manual(values = c("#6AE2D0", "#9DC4D3","#577986","#865C57","#DBCECD") )+
+  labs(x = "Capacity (%)", y = NULL, fill = NULL, 
+       title = "Projected proportion of new fossil gas over all fuels capacity (2022 Ember data)",
+       subtitle = "New projected fossil gas capacity from units with construction + planned + shelved status") +
+  theme_bw()
+
+
+```
+
+------------------------------------------------------------------------
+
+## Age and timeline of capacity
+
+Excluding retired and cancelled units
+
+```{r}
+#| fig-width: 10
+#| fig-height: 6
+#| 
+minYear <- min(allData$start_year, na.rm = TRUE)
+maxYear <- max(allData$planned_retirement_year, na.rm = TRUE)
+
+timeDt <- allData %>% 
+  select(bff_unit_id, Country, status, start_year, retirement_year, planned_retirement_year) %>% 
+  filter(!status %in% c('cancelled', 'retired')) %>% 
+  mutate(end_yearCat = case_when(!is.na(planned_retirement_year) ~ 'planned',
+                                 TRUE~'unplanned'),
+         end_year = case_when(!is.na(retirement_year) ~ retirement_year,
+                              !is.na(planned_retirement_year) ~ planned_retirement_year,
+                              TRUE~NA),
+         unit_age2024 = 2024-start_year,
+         unit_age2050 = ifelse(is.na(end_year), 2050-start_year, end_year-start_year)) 
+
+### How much missing information for year data (in %)
+# timeDt %>% 
+#   summarise(across(c(start_year, retirement_year, planned_retirement_year), ~round(sum(is.na(.))/n(),3)))*100
+
+ggplot(timeDt, aes(x = end_yearCat)) +
+  geom_bar(aes(fill = fct_infreq(status)), stat = 'count') +
+  geom_text(stat = 'count', aes(label = ..count.., y = ..count..), vjust = -0.2, position = position_stack(vjust = 1)) +
+  theme_bw() +
+  scale_fill_manual(values = colStatus2[-c(7,8)]) + 
+  labs(x = "Retirement status", y = "Count of units", fill = NULL,
+       title = paste0("The vast majority of units don't have information of retirement year\nand there are ",
+                      table(is.na(timeDt$start_year))['TRUE'], " units without a starting year"))
+```
+
+------------------------------------------------------------------------
+
+### Age
+
+```{r}
+timeDt %>%
+  filter(!is.na(unit_age2024), unit_age2024 > 0)  %>% 
+ggplot(aes(x = start_year)) +
+  geom_histogram(binwidth = 5, color = 'white') +
+  scale_x_continuous(expand = expansion(mult = c(0, 0.01)),
+                       breaks = c(1925, 1945, 1965, 1985, 2005, 2025)) +
+  scale_y_continuous(expand = expansion(mult = c(0, 0.01))) +
+  labs(title = "Distribution of starting year",
+       x = "Bins of starting year",
+       y = "Count of units") +
+  theme_bw() +
+  theme(panel.grid.major = element_blank(),  
+    panel.grid.minor = element_blank())
+
+timeDt %>%
+  filter(!is.na(unit_age2024), unit_age2024 > 0)  %>% 
+  ggplot(aes(x = unit_age2024)) +
+  geom_histogram(binwidth = 5, color = 'white') +
+  scale_x_continuous(expand = expansion(mult = c(0, 0.01)),
+                     breaks = seq(0,100,10)
+                     ) +
+  scale_y_continuous(expand = expansion(mult = c(0, 0.01))) +
+  labs(title = "Distribution of unit ages",
+       x = "Bins of age",
+       y = "Count of units") +
+  theme_bw() +
+  theme(panel.grid.major = element_blank(),  # Remove major gridlines
+        panel.grid.minor = element_blank())
+```
+
+------------------------------------------------------------------------
+
+### Timeline of capacity changes
+
+Take start_year + retirement_year\|planned_retirement_year (end_year) to get unit age and then expand the data using unit ID from minimum year to maximum year as many rows as age for each unit. Unsure how to deal with units without starting_year. Using unit adjusted capacity per owner and excluding retired and cancelled units.
+
+#### Overall capacity changes through time given available information regarding starting and ending years
+
+```{r}
+expanded_timeDt <- timeDt %>% 
+  select( bff_unit_id, Country, status, start_year, end_year, unit_age2050) %>% 
+  drop_na(start_year) %>% 
+  rowwise() %>% 
+  mutate(end_year = if_else(is.na(end_year), start_year + unit_age2050, end_year),
+         yearRow = list(seq(from = start_year, to = min(2050, end_year)))) %>% 
+  unnest(yearRow) %>% 
+  full_join(select(OwnerDt, bff_unit_id, capacity_adjusted, parent), relationship = "many-to-many") %>% ### to account for the units with multiple owners but not sure if good enough
+  filter(!is.na(yearRow), !status %in% c('shelved', 'cancelled')) %>% 
+  arrange(yearRow)
+
+aggregated_All <- expanded_timeDt %>%
+  group_by(yearRow) %>%
+  summarise(total_capacity = sum(capacity_adjusted)) %>% 
+  filter(yearRow > 1950)
+
+y2024 <- aggregated_All %>%
+  filter(yearRow == 2024) %>%
+  summarise(total_capacity = sum(total_capacity)) %>%
+  pull(total_capacity)
+
+ggplot(aggregated_All, aes(x = yearRow, y = total_capacity)) +
+  geom_area(fill = NA, color = 'grey30') +
+  geom_vline(aes(xintercept = 2024), linetype = 'dashed' ) +
+ annotate("text", x = 2023.5, y = y2024, 
+                label = paste('Capacity in 2024:', round(y2024, 0)), 
+            hjust = 1, vjust = 0) +
+  theme_classic() +
+  labs(x = NULL, y = "Capacity (MW)", 
+       title = "Projected capacity through time given available time information",
+       subtitle = "Ignoring status and assuming starting year of planned is correct.") +
+  scale_x_continuous(breaks = scales::pretty_breaks(n = 10)) +
+  scale_y_continuous(labels = label_number_auto())
+```
+
+------------------------------------------------------------------------
+
+#### Country-wide capacity changes through time - current Top 10 (2000-2035)
+
+```{r}
+#| fig-width: 10
+#| fig-height: 5
+aggregated_Country <- expanded_timeDt %>%
+  group_by(yearRow, Country) %>%
+  summarise(total_capacity = sum(capacity_adjusted)) %>% 
+  filter(yearRow > 1950) 
+
+top10 <- statusPlant %>%  
+  group_by(Country) %>% 
+  summarize(total = sum(capacity_MW_installed, na.rm = T)) %>% 
+  arrange(desc(total)) %>% slice(1:10) %>% pull(Country)
+
+filter(aggregated_Country, Country %in% top10 &
+         yearRow >= 2000 & yearRow <= 2035) %>% 
+    mutate(Country = factor(Country, levels = top10)) %>% 
+  ggplot(aes(x = yearRow, y = total_capacity, fill = Country)) +
+  geom_area(colour = 'grey30', show.legend = FALSE) +
+  geom_vline(aes(xintercept = 2024), linetype = 'dashed' ) +
+  facet_wrap(~Country, scales = 'fixed', ncol = 4) +
+  scale_fill_manual(values = colorspace::lighten(RColorBrewer::brewer.pal(10, "Spectral")[1:10],0.2)) +
+  theme_classic() +
+  labs(x = NULL, y = "Capacity (MW)", 
+       title = "Projected capacity through time given available time information for current top 10 countries (2000-2035)",
+       subtitle = "Ignoring status and assuming starting year of planned is correct.") +
+  scale_x_continuous(breaks = scales::pretty_breaks()) +
+  scale_y_continuous(labels = label_number_auto())
+```
+
+------------------------------------------------------------------------
+
+#### Contrast of top 10 countries projections with all other countries
+
+```{r}
+#| fig-width: 10
+#| fig-height: 5
+#| 
+## data for Projected capacity per year - top 10 area 
+dttop10 <- aggregated_Country %>% 
+  filter(Country %in% top10 &
+           yearRow >= 2000 & yearRow <= 2035) %>% 
+  arrange(yearRow, desc(total_capacity)) %>% 
+  pivot_wider(names_from = Country, values_from = total_capacity) %>% 
+  mutate(Category = 'Per country') %>% 
+  ungroup()
+
+dttop10A <- dttop10 %>% 
+  pivot_longer(cols = -c(yearRow,Category)) %>% 
+  group_by(yearRow) %>% 
+  summarize(`Top 10`= sum(value)) %>% 
+  left_join(aggregated_All) %>% 
+  mutate(Other = total_capacity - `Top 10`,
+         Category = 'Overall') %>% 
+  select(-total_capacity) %>% 
+  bind_rows(dttop10)
+
+## data for Projected capacity per year - all in grid
+dtGrid <- aggregated_Country %>% 
+    filter(yearRow >= 2000 & yearRow <= 2035) %>% 
+  rename(country_capacity = total_capacity) %>% 
+  left_join(aggregated_All) %>% 
+  mutate(Other = total_capacity - country_capacity) %>% 
+  filter(Country %in% top10) ### not sure is worth showing the others
+
+dtGrid %>% 
+  pivot_longer(cols = c(country_capacity, Other)) %>% 
+  arrange(match(Country, top10)) %>% 
+  ggplot(aes(x = yearRow, y = value, fill = name)) +
+  geom_area() +
+  geom_vline(aes(xintercept = 2024), linetype = 'dashed' ) +
+  facet_wrap(~fct_inorder(Country), ncol = 4) +
+  #scale_x_continuous(breaks = c(2023,2027,2030)) +
+  scale_y_continuous(labels = label_number_auto()) +
+  labs(fill = NULL, x = NULL, y = "Capacity", title = "Per country projected capacity for top 10 countries in comparison to all other countries") +
+  scale_fill_manual(values = c("black", alpha("grey80", 0.4))) +
+  theme_classic() +
+  theme(legend.position = 'none')
+
+```
+
+------------------------------------------------------------------------
+
+#### Capacity changes through time for current top 10 owners (2000 - 2035)
+
+```{r}
+#| fig-width: 10
+#| fig-height: 5
+aggregated_Parent <- expanded_timeDt %>%
+  group_by(yearRow, parent) %>%
+  summarise(total_capacity = sum(capacity_adjusted)) %>% 
+  filter(yearRow > 1950) 
+
+top10EuropeUti <- filter(cap_utilities, 
+                         status %in% c('operating', 'mothballed'))  %>% 
+  group_by(parent) %>%
+  summarize(ParentCapacity = sum(capacity_adjusted)) %>% 
+  arrange(desc(ParentCapacity)) %>% 
+  mutate(EURank = row_number()) %>%
+  filter(EURank <= 10) 
+
+filter(aggregated_Parent, parent %in% top10EuropeUti$parent &
+         yearRow >= 2000 & yearRow <= 2035) %>% 
+    mutate(parent = factor(parent, levels = top10EuropeUti$parent)) %>% 
+  ggplot(aes(x = yearRow, y = total_capacity, fill = parent)) +
+  geom_area(color = 'grey30', show.legend = FALSE) +
+  geom_vline(aes(xintercept = 2024), linetype = 'dashed' ) +
+  facet_wrap(~parent, scales = 'fixed', ncol = 4) +
+  scale_fill_manual(values = colorspace::lighten(RColorBrewer::brewer.pal(10, "Spectral")[1:10],0.2)) +
+  scale_x_continuous(breaks = scales::pretty_breaks()) +
+  scale_y_continuous(labels = label_number_auto()) +
+  theme_classic() +
+  labs(x = NULL, y = "Capacity (MW)", 
+       title = "Projected capacity through time given available time information for current top 10 parent companies (2000-2035)",
+       subtitle = "Ignoring status and assuming starting year of planned is correct.") 
+```
+
+------------------------------------------------------------------------
+

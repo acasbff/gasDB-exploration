@@ -1,0 +1,33 @@
+project:
+  type: website
+
+
+website:
+  title: "Exploration of gas power plant data"
+  navbar:
+    left:
+      - href: index.qmd
+        text: Home
+
+format: 
+  html:
+    embed-resources: true
+    self-contained: true
+    code-fold: true
+    toc: true
+    toc-depth: 5
+    toc-float:
+      collapsed: true
+      smooth-scroll: true
+    theme: default
+    number-sections: false
+
+execute:
+  echo: true
+  cache: true
+  warning: false
+  message: false
+  fig-align: center
+  fig-width: 10
+  progress: true
+  verbose: true
