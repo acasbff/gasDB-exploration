@@ -35,6 +35,10 @@ body {
 #| echo: false
 
 ### to upload quarto notebook to website: quarto publish quarto-pub
+### staticrypt _site/index.html -p PASSWORD --short -o encrypted/index.html && mv encrypted/index.html _site/index.html && rm -rf encrypted
+## git add -f _site/index.html
+## git commit -m "Update Quarto"
+## git push origin gh-pages
 
 library(scales)
 library(tidyverse)
