@@ -1,1 +1,15 @@
+# Ignore system files
+.DS_Store
+
+# Ignore Quarto output directories
+_site/
+docs/
+
+# Ignore RStudio project files
+.Rproj.user/
+.Rhistory
+.RData
+
+# Ignore log files
+*.log
 /.quarto/
