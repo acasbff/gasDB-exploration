@@ -291,49 +291,6 @@ f0Nf1N
 ### Verify how many units have multiple owners
 
 ```{r}
-# df <- allData %>% 
-#   select(bff_unit_id, capacity_mw, owner_1:owner_3_share) 
-# 
-# # Pre-allocate the list to store the data
-# rows <- list()
-# 
-# # Loop through each row of the dataframe
-# for (i in 1:nrow(df)) {
-#   # Extract the current row's data
-#   current_row <- df[i, ]
-#   capacity_mw <- current_row$capacity_mw
-#   
-#   # Determine the number of owners with non-NA shares
-#   non_na_shares <- sum(!is.na(current_row[grepl("_share$", names(current_row))]))
-#   N_ownerUnit <- ifelse(non_na_shares > 0, non_na_shares, 3) # Assume 3 if all shares are NA
-#   
-#   # Loop through each owner
-#   for (j in 1:3) {
-#     owner <- current_row[[paste0("owner_", j)]]
-#     # Skip the loop iteration if owner is NA
-#     if (is.na(owner)) next
-#     
-#     owner_share <- current_row[[paste0("owner_", j, "_share")]]
-#     capacity_adjusted <- ifelse(is.na(owner_share), capacity_mw / N_ownerUnit, capacity_mw * owner_share)
-#     
-#     # Append the data to the list
-#     rows <- c(rows, list(data.frame(
-#       bff_unit_id = current_row$bff_unit_id,
-#       N_ownerUnit = N_ownerUnit,
-#       owner = owner,
-#       capacity_mw = capacity_mw,
-#       owner_share = owner_share,
-#       capacity_adjusted = capacity_adjusted
-#     )))
-#   }
-# }
-# 
-# # Combine the list of data frames into one data frame
-# OwnerDt <- do.call(rbind, rows)
-# 
-# # Convert the capacity_adjusted to numeric in case it is not already
-# OwnerDt$capacity_adjusted <- as.numeric(OwnerDt$capacity_adjusted)
-
 OwnerDt <- select(OwnerDt0, bff_plant_id, bff_unit_id, 
                    owner, parent, capacity_mw, share) %>%
   rename(capacity_adjusted = capacity_mw, owner_share = share) %>% 
