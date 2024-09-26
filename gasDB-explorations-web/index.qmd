@@ -33,6 +33,9 @@ body {
 
 ```{r}
 #| echo: false
+
+### to upload quarto notebook to website: quarto publish quarto-pub
+
 library(scales)
 library(tidyverse)
 library(readxl)
@@ -219,7 +222,7 @@ statusPlant <- allData %>%
 
 Currently, database information on peaker units is only available for those units where a source provided some indication that the unit might be used as a peaker. Therefore, the following plots classify baseload units as those for which no information suggests peaker usage.
 
-```{r, fig.width=8, fig.height=5}
+```{r, fig.width=8, fig.height=4}
 issues <- select(allData, bff_unit_id , gem_unit_id, status, technology, fuel_main, fuel_secondary) %>% 
   mutate(Fuel_type_BFF = ifelse(is.na(fuel_secondary), "Fossil gas only", "Multiple fuels")) %>% 
   inner_join(gemFuelData) %>% 
@@ -277,7 +280,6 @@ f0Nf1N <- (f0N + f1N) +
   plot_annotation(
     title = "Comparison with number of power plant units")
 f0Nf1N
-
 ```
 
 ------------------------------------------------------------------------

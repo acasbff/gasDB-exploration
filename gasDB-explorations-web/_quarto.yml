@@ -15,17 +15,18 @@ format:
     embed-resources: true
     self-contained: true
     code-fold: true
+    code-tools: true
     toc: true
     toc-depth: 5
     toc-float:
-      collapsed: true
+      collapsed: false
       smooth-scroll: true
     theme: default
     number-sections: false
 
 execute:
-  echo: true
-  cache: true
+  echo: false
+  cache: false
   warning: false
   message: false
   fig-align: center
