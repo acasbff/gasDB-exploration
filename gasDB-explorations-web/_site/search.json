@@ -1,0 +1,44 @@
+[
+  {
+    "objectID": "about.html",
+    "href": "about.html",
+    "title": "About",
+    "section": "",
+    "text": "About this site\n\n\n[1] 2"
+  },
+  {
+    "objectID": "index.html#overview-of-the-data",
+    "href": "index.html#overview-of-the-data",
+    "title": "Exploration of gas power plant data",
+    "section": "Overview of the data",
+    "text": "Overview of the data\n\n\n\n\n\n\n\nVerify how many power plant units have multiple fuel or are peaker\nCurrently, database information on peaker units is only available for those units where a source provided some indication that the unit might be used as a peaker. Therefore, the following plots classify baseload units as those for which no information suggests peaker usage.\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\nVerify how many units have multiple owners\n\n\n\n\n\n\n\n\n\n\n\nVerify how many power plants have units with different status\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n1317 power plants have units with different status.\n\n\n\n\n\n\n\n\n\nNot sure if the power plants where there are no operating unit should have a “Installed” power plant status."
+  },
+  {
+    "objectID": "index.html#overall-capacity-per-status",
+    "href": "index.html#overall-capacity-per-status",
+    "title": "Exploration of gas power plant data",
+    "section": "Overall capacity per status",
+    "text": "Overall capacity per status\n\nOverall (unit and power plant status)\n\n\n\n\n\n\n\n\n\n\n\nPer country (unit status)"
+  },
+  {
+    "objectID": "index.html#capacity-for-top-10-utilities",
+    "href": "index.html#capacity-for-top-10-utilities",
+    "title": "Exploration of gas power plant data",
+    "section": "Capacity for top 10 utilities",
+    "text": "Capacity for top 10 utilities\n\nAcross Europe per status\n\n\n\n\n\n\n\n\n\n\n\n\nPer Country\n\nPre-construction + announced\n\n\n\n\n\n\n\n\n\n\n\nConstruction\n\n\n\n\n\n\n\n\n\n\n\nOperating + mothballed\n\n\n\n\n\n\n\n\n\n\n\nShelved\n\n\n\n\n\n\n\n\n\n\n\nCancelled\n\n\n\n\n\n\n\n\n\n\n\nRetired"
+  },
+  {
+    "objectID": "index.html#projected-new-capacity-vs-all-fuels-from-ember",
+    "href": "index.html#projected-new-capacity-vs-all-fuels-from-ember",
+    "title": "Exploration of gas power plant data",
+    "section": "Projected new capacity vs all fuels (from Ember)",
+    "text": "Projected new capacity vs all fuels (from Ember)\nAll BFF countries with any planned or in construction capacity"
+  },
+  {
+    "objectID": "index.html#age-and-timeline-of-capacity",
+    "href": "index.html#age-and-timeline-of-capacity",
+    "title": "Exploration of gas power plant data",
+    "section": "Age and timeline of capacity",
+    "text": "Age and timeline of capacity\nExcluding retired and cancelled units\n\n\n\n\n\n\n\n\n\n\n\nAge\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\nTimeline of capacity changes\nTake start_year + retirement_year|planned_retirement_year (end_year) to get unit age and then expand the data using unit ID from minimum year to maximum year as many rows as age for each unit. Unsure how to deal with units without starting_year. Using unit adjusted capacity per owner and excluding retired and cancelled units.\n\nOverall capacity changes through time given available information regarding starting and ending years\n\n\n\n\n\n\n\n\n\n\n\n\nCountry-wide capacity changes through time - current Top 10 (2000-2035)\n\n\n\n\n\n\n\n\n\n\n\n\nContrast of top 10 countries projections with all other countries\n\n\n\n\n\n\n\n\n\n\n\n\nCapacity changes through time for current top 10 owners (2000 - 2035)"
+  }
+]
