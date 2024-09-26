@@ -1,6 +1,6 @@
 name: Quarto Publish with Encryption
 
-# Trigger the action whenever there is a push to the 'main' branch
+# Trigger the action on push to the 'main' branch
 on:
   push:
     branches:
@@ -16,24 +16,33 @@ jobs:
         uses: actions/checkout@v2
 
       # Step 2: Set up Quarto
+        # This sets up Quarto on the GitHub Actions runner to render the site.
       - name: Set up Quarto
         uses: quarto-dev/quarto-actions/setup@v2
 
       # Step 3: Render the Quarto site
+        # This command generates the static site files in the '_site' directory.
       - name: Render Quarto site
         run: |
           quarto render
 
-      # Step 4: Encrypt the 'index.html' file using Staticrypt
-      # This step uses the GitHub secret to pass the password securely
+      # Step 4: Install Staticrypt (in case it’s not available on the runner)
+        # This ensures Staticrypt is available for encryption.
+      - name: Install Staticrypt
+        run: |
+          npm install -g staticrypt
+
+      # Step 5: Encrypt index.html using Staticrypt with a password from GitHub Secrets
+        # This step encrypts the '_site/index.html' with the password stored in the secret.
       - name: Encrypt index.html
         run: |
-          npx staticrypt _site/index.html ${{ secrets.STATICRYPT_PASSWORD }} --short -o _site/index.html
+          staticrypt _site/index.html ${{ secrets.STATICRYPT_PASSWORD }} --short -o _site/index.html
 
-      # Step 5: Deploy the Quarto site to the 'gh-pages' branch
+      # Step 6: Deploy the site to GitHub Pages
+        # This step deploys the contents of the '_site' directory (which now contains the encrypted 'index.html')
+        # to the 'gh-pages' branch using the Peaceiris action.
       - name: Deploy to GitHub Pages
         uses: peaceiris/actions-gh-pages@v3
         with:
-          github_token: ${{ secrets.ITHUB_TOKEN }}
+          github_token: ${{ secrets.GITHUB_TOKEN }}
           publish_dir: ./_site
-
