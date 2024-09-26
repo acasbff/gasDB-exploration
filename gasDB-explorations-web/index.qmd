@@ -2,6 +2,8 @@
 title: "Exploration of gas power plant data"
 author: "Ana Afonso Silva"
 date: "`r Sys.Date()`"
+editor_options: 
+  chunk_output_type: console
 ---
 
 ```{css, echo = FALSE}
@@ -215,9 +217,11 @@ statusPlant <- allData %>%
 
 ### Verify how many power plant units have multiple fuel or are peaker
 
-```{r, fig.width=8, fig.height=4}
+Currently, database information on peaker units is only available for those units where a source provided some indication that the unit might be used as a peaker. Therefore, the following plots classify baseload units as those for which no information suggests peaker usage.
+
+```{r, fig.width=8, fig.height=5}
 issues <- select(allData, bff_unit_id , gem_unit_id, status, technology, fuel_main, fuel_secondary) %>% 
-  mutate(Fuel_type_BFF = ifelse(is.na(fuel_secondary), "NG", "multiple")) %>% 
+  mutate(Fuel_type_BFF = ifelse(is.na(fuel_secondary), "Fossil gas only", "Multiple fuels")) %>% 
   inner_join(gemFuelData) %>% 
   rename( Fuel_GEM = Fuel, Fuel_type_GEM = Fuel_type) %>% 
   filter(Fuel_type_BFF != Fuel_type_GEM)
@@ -226,15 +230,15 @@ issues <- select(allData, bff_unit_id , gem_unit_id, status, technology, fuel_ma
 
 fuelUnits <- allData %>% 
   select(bff_plant_id, capacity_mw, type, fuel_main, fuel_secondary) %>% 
-  mutate(type = ifelse(is.na(type), "baseload", str_to_lower(type)),
-         Fuel_type = ifelse(is.na(fuel_secondary), "NG", "multiple"))
+  mutate(type = ifelse(is.na(type), "Baseload", str_to_sentence(type)),
+         Fuel_type = ifelse(is.na(fuel_secondary), "Fossil gas only", "Multiple fuels"))
 
 f0c <- ggplot(fuelUnits, aes(x = type, y = capacity_mw)) +
   geom_bar(stat = "summary", fun = sum, show.legend = FALSE) +
   stat_summary(aes(label = round(stat(y),0)), fun.y = 'sum', geom = 'text', vjust = -0.1, size = 3) +
   theme_bw() +
   scale_y_continuous(labels = label_number()) +
-  labs(x = "",
+  labs(x = NULL,
        y = "Total capacity of power plant units",
        caption = "All except peaker are baseload")
 
@@ -244,7 +248,7 @@ f1c <- ggplot(fuelUnits, aes(x = Fuel_type, y = capacity_mw, fill = Fuel_type)) 
   facet_wrap(~type, scale = "free") +
   theme_bw() +
   scale_y_continuous(labels = label_number()) +
-  labs(y = "Total capacity of power plant units", x = "Fuel type")
+  labs(y = "Total capacity of power plant units", x = NULL)
 
 f0cf1c <- (f0c + f1c) +
   patchwork::plot_layout(widths = c(0.5, 2), guides = 'collect') +
@@ -257,7 +261,7 @@ f0N <- ggplot(fuelUnits, aes(x = type)) +
     geom_text(stat='count', aes(label=..count..), vjust=-0.1, size = 3) + 
   theme_bw() +
   scale_y_continuous(labels = label_number()) +
-  labs(x = "",
+  labs(x = NULL,
        y = "Count of power plant units", caption = 'All except peaker are baseload')
 
 f1N <- ggplot(fuelUnits, aes(x = Fuel_type, fill = Fuel_type)) +
@@ -266,7 +270,7 @@ f1N <- ggplot(fuelUnits, aes(x = Fuel_type, fill = Fuel_type)) +
   facet_wrap(~type, scale = "free") +
   theme_bw() +
   scale_y_continuous(labels = label_number()) +
-  labs(y = "Count of power plant units", x = "Fuel type")
+  labs(y = "Count of power plant units", x = NULL)
 
 f0Nf1N <- (f0N + f1N) +
   plot_layout(widths = c(0.5, 2), guides = 'collect') +
