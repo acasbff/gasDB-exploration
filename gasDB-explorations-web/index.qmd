@@ -77,6 +77,8 @@ names(colStatus2) <- c("announced","pre-construction","construction","operating"
 
 ## Overview of the data
 
+this is a test
+
 ```{r}
 countryMatch0 <- read_delim('/Users/acas/Dropbox/BFF/projects/BFFcountries.txt', show_col_types = FALSE) %>% 
   rename(country = Iso2)
