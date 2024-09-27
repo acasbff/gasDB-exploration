@@ -24,6 +24,7 @@ format:
     number-sections: false
 
 execute:
+  freeze: auto
   echo: false
   cache: false
   warning: false
